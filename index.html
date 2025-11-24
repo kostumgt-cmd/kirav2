@@ -1,0 +1,763 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kira Takip Sistemi</title>
+    <!-- Tailwind CSS (CDN) - Mobil uyumlu modern tasarım için -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        // Tailwind ayarları ve renk paleti
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                    },
+                    colors: {
+                        'primary': '#4f46e5', // Koyu İndigo
+                        'secondary': '#6366f1', // Açık İndigo
+                        'accent': '#f59e0b', // Amber (Admin butonu için)
+                        'delete': '#ef4444', // Kırmızı (Silme butonu için)
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        /* Ana tasarım ve mobil uyumluluk */
+        body {
+            background-color: #f3f4f6;
+            font-family: 'Inter', sans-serif;
+            margin: 0;
+            padding: 0;
+        }
+        #app-container {
+            /* Mobil cihazlarda ortalanmış, tam ekran deneyimi için */
+            max-width: 600px; 
+            margin: 0 auto;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            background-color: white;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        }
+        
+        /* Giriş ekranını tam ekran ve üstte tutar */
+        #login-screen {
+             height: 100%;
+             width: 100%;
+             position: absolute;
+             top: 0;
+             left: 0;
+        }
+
+        /* Kiracı Yönetimi Modalındaki tek bir kiracı satırı düzeni */
+        .tenant-row {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            padding: 12px;
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+        }
+        .tenant-row .input-group label {
+            font-size: 0.75rem; /* text-xs */
+            font-weight: 500;
+            margin-bottom: 4px;
+        }
+        
+        /* Genel geçiş efekti */
+        .screen-transition {
+            transition: opacity 0.3s ease-in-out;
+        }
+    </style>
+    <!-- Google Font (Inter) -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div id="app-container">
+        
+        <!-- 1. Giriş Sayfası (Varsayılan olarak görünür) -->
+        <section id="login-screen" class="screen-transition flex flex-col items-center justify-center p-8 text-center h-full w-full absolute top-0 left-0 bg-white z-10">
+            <div class="p-8 bg-indigo-50 rounded-xl shadow-lg w-full max-w-sm">
+                <h1 class="text-3xl font-bold text-primary mb-6">Kira Gelir Takip Sistemi</h1>
+                <p class="text-gray-600 mb-8">Lütfen rolünüzü seçerek uygulamaya giriş yapın.</p>
+
+                <!-- Viewer Girişi -->
+                <button onclick="App.loginAsViewer()" class="w-full py-3 px-4 mb-4 bg-primary text-white font-semibold rounded-lg shadow-md hover:bg-secondary focus:outline-none focus:ring-4 focus:ring-indigo-300 transition duration-150">
+                    Görüntüleyici Olarak Giriş Yap
+                </button>
+
+                <!-- Admin Girişi -->
+                <div class="mt-8 pt-4 border-t border-gray-200">
+                    <p class="text-sm font-medium text-gray-700 mb-3">Admin Girişi (PIN: 1234)</p>
+                    <input id="admin-pin" type="password" placeholder="PIN Girin" maxlength="4" class="w-full p-3 border border-gray-300 rounded-lg text-center text-xl tracking-widest focus:ring-secondary focus:border-secondary transition duration-150">
+                    <button onclick="App.attemptAdminLogin()" class="mt-3 w-full py-2 px-4 bg-accent text-white font-semibold rounded-lg shadow-md hover:bg-yellow-600 focus:outline-none focus:ring-4 focus:ring-yellow-300 transition duration-150">
+                        Admin Girişi
+                    </button>
+                    <p id="pin-error" class="text-red-500 text-sm mt-2 hidden">Hatalı PIN!</p>
+                </div>
+            </div>
+             <!-- Firestore ile doğru kullanıcı takibi için ID gösterimi zorunludur -->
+            <p class="mt-6 text-xs text-gray-400">Kullanıcı ID: <span id="user-id-display">Yükleniyor...</span></p>
+        </section>
+
+        <!-- 2. Ana Uygulama Ekranı -->
+        <section id="main-screen" class="screen-transition flex-1 w-full flex-col hidden overflow-y-auto">
+            <header class="bg-primary text-white p-4 shadow-md sticky top-0 z-20">
+                <div class="flex justify-between items-center">
+                    <h1 class="text-xl font-bold">Beklenen Kira Gelirleri</h1>
+                    <div class="flex items-center space-x-2">
+                        <span id="role-display" class="text-sm font-medium bg-secondary px-3 py-1 rounded-full">Rol: Viewer</span>
+                        <button onclick="App.logout()" class="text-sm hover:text-red-300 transition duration-150">Çıkış</button>
+                    </div>
+                </div>
+            </header>
+
+            <!-- Filtreler ve Toplam Gelir -->
+            <div class="p-4 bg-white sticky top-[64px] z-10 border-b border-gray-200">
+                <!-- Filtre Butonları -->
+                <div id="filter-container" class="flex justify-around space-x-2 mb-4">
+                    <button data-filter="currentMonth" class="filter-btn bg-primary text-white font-medium py-2 px-4 rounded-lg text-sm transition duration-150">Bu Ay</button>
+                    <button data-filter="lastMonth" class="filter-btn bg-gray-200 text-gray-700 font-medium py-2 px-4 rounded-lg text-sm hover:bg-gray-300 transition duration-150">Geçen Ay</button>
+                    <button data-filter="lastSixMonths" class="filter-btn bg-gray-200 text-gray-700 font-medium py-2 px-4 rounded-lg text-sm hover:bg-gray-300 transition duration-150">Son 6 Ay</button>
+                </div>
+
+                <!-- Toplam Gelir Kartı -->
+                <div class="bg-indigo-100 p-4 rounded-xl shadow-inner text-center mb-4">
+                    <p class="text-md font-medium text-gray-700">Beklenen Toplam Kira Geliri (<span id="current-period-text">Bu Ay</span>)</p>
+                    <p id="total-income" class="text-4xl font-extrabold text-primary mt-1">0.00 ₺</p>
+                </div>
+
+                <!-- Kiracı Özetleri Kartı -->
+                <div class="bg-white p-4 rounded-xl shadow border border-gray-200">
+                    <h2 class="text-lg font-semibold text-gray-800 mb-3 border-b pb-2">Kiracı Bazında Beklenen Gelir Özeti</h2>
+                    <div id="tenant-summary-card" class="space-y-2">
+                        <p class="text-sm text-gray-500">Özet hesaplanıyor...</p>
+                    </div>
+                </div>
+
+                <!-- Admin Yönetim Butonu -->
+                <div id="admin-actions" class="mt-4 hidden">
+                    <button onclick="App.openTenantManagementModal()" class="w-full py-3 bg-accent text-white font-bold rounded-lg shadow-md hover:bg-yellow-600 focus:outline-none focus:ring-4 focus:ring-yellow-300 transition duration-150 flex items-center justify-center">
+                        <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37a1.724 1.724 0 002.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+                        Kiracı ve Zam Yönetimi (Ekle/Düzenle/Sil)
+                    </button>
+                </div>
+            </div>
+
+            <!-- Simüle Edilmiş Kira Takvimi Listesi -->
+            <div class="p-4 flex-1 overflow-y-auto">
+                <h2 class="text-lg font-semibold text-gray-800 mb-3">Simüle Edilmiş Beklenen Kira Takvimi</h2>
+                <div id="schedule-list" class="space-y-3">
+                    <div id="loading-indicator" class="text-center text-gray-500 py-8">Veriler yükleniyor...</div>
+                </div>
+                <div id="no-payments" class="text-center text-gray-500 py-8 hidden">Filtreye uyan bir kayıt bulunamadı.</div>
+                
+                <!-- Boş veritabanı uyarısı (Admin için) -->
+                <div id="empty-db-admin-hint" class="bg-red-100 border border-red-300 text-red-700 p-4 rounded-lg mt-4 hidden">
+                    <p class="font-bold">UYARI: Kiracı Verisi Bulunamadı!</p>
+                    <p class="text-sm mt-1">Lütfen "Kiracı ve Zam Yönetimi" butonuna basarak **ilk kiracı listesini oluşturun.**</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- 3. Modal: Kiracı Yönetimi (CRUD) -->
+        <div id="tenant-modal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-30 flex items-center justify-center p-4">
+            <div class="modal-content bg-white p-6 rounded-xl shadow-2xl w-full max-w-md transform transition-all duration-300">
+                <h3 id="modal-title" class="text-2xl font-bold text-accent mb-2">Kiracı Yönetimi</h3>
+                <p id="modal-subtitle" class="text-sm text-gray-600 mb-4">Kiracıları ekleyin, güncelleyin veya silin. Sabit kira tutarı takvimi etkileyecektir.</p>
+                
+                <button onclick="App.addNewTenantRow()" class="w-full py-2 mb-4 bg-primary text-white font-semibold rounded-lg shadow-md hover:bg-secondary transition duration-150 flex items-center justify-center">
+                    <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path></svg>
+                    Yeni Kiracı Ekle
+                </button>
+
+                <form id="tenant-form">
+                    <div id="tenant-inputs" class="space-y-4 max-h-80 overflow-y-auto pr-2 pb-4">
+                        <!-- Kiracı listesi buraya JS ile eklenecek -->
+                        <p class="text-gray-500 text-center">Yönetim verileri yükleniyor...</p>
+                    </div>
+                    
+                    <div class="flex justify-end space-x-3 mt-4 pt-4 border-t border-gray-200">
+                        <button type="button" onclick="App.closeTenantModal()" class="py-2 px-4 bg-gray-300 text-gray-800 font-semibold rounded-lg hover:bg-gray-400 transition duration-150">
+                            Kapat
+                        </button>
+                        <button type="submit" class="py-2 px-4 bg-accent text-white font-semibold rounded-lg shadow-md hover:bg-yellow-600 transition duration-150">
+                            Tümünü Kaydet
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+        
+        <!-- 4. Mesaj Kutusu (Kullanıcıya bildirimler için) -->
+        <div id="message-box" class="fixed bottom-4 right-4 p-3 rounded-lg shadow-xl text-white z-50 transition-transform transform translate-x-full"></div>
+    </div>
+
+    <!-- Firebase SDK'ları ve Uygulama Mantığı -->
+    <script type="module">
+        // Firebase Modül İçe Aktarımları
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, onSnapshot, collection, Timestamp, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Firestore log seviyesini ayarla (Geliştirme ve hata ayıklama için faydalı)
+        setLogLevel('debug');
+
+        // Global Firebase değişkenleri ve durum yönetimi
+        let app, db, auth;
+        let userId = 'anon'; 
+        let unsubscribeTenants = null; // onSnapshot dinleyicisini tutar
+        let newTenantCounter = 0; // Geçici kiracı ID'leri için sayaç
+        
+        // Uygulama Durumu (Global App objesi)
+        window.App = {
+            role: 'viewer', 
+            currentFilter: 'currentMonth', 
+            isAuthReady: false,
+            tenantsData: [], // Firestore'dan gelen güncel kiracı verisi
+            
+            // Veritabanı boşsa Admin'e gösterilecek başlangıç verileri
+            initialTenants: [
+                { id: 'KIRACI_A_101', name: 'Ayşe Yılmaz', fixedRent: 7500, apartment: 'Daire 101' },
+                { id: 'KIRACI_B_203', name: 'Burak Demir', fixedRent: 9000, apartment: 'Daire 203' },
+                { id: 'KIRACI_C_305', name: 'Cem Kaya', fixedRent: 6000, apartment: 'Daire 305' },
+                { id: 'KIRACI_D_401', name: 'Deniz Çelik', fixedRent: 10000, apartment: 'Daire 401' },
+            ],
+
+            // --- Mesaj Kutusu ---
+            showMessage(message, type = 'success') {
+                const box = document.getElementById('message-box');
+                box.textContent = message;
+                box.className = 'fixed bottom-4 right-4 p-3 rounded-lg shadow-xl text-white z-50 transition-transform transform';
+                
+                let bgColor = 'bg-green-500';
+                if (type === 'error') bgColor = 'bg-red-500';
+                if (type === 'warning') bgColor = 'bg-yellow-500';
+
+                box.classList.add(bgColor, 'translate-x-0');
+
+                // Otomatik olarak kaybolması için zamanlayıcı
+                setTimeout(() => {
+                    box.classList.remove('translate-x-0');
+                    box.classList.add('translate-x-full');
+                }, 3000);
+            },
+
+            // --- Firebase ve Auth Başlatma ---
+            async initAuth() {
+                try {
+                    // Canvas Ortam Değişkenleri
+                    const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+                    const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+
+                    if (!firebaseConfig.projectId) {
+                        this.showMessage("HATA: Firebase yapılandırması eksik. Lütfen Canvas ortamında çalıştırın.", 'error');
+                        return;
+                    }
+
+                    app = initializeApp(firebaseConfig);
+                    db = getFirestore(app);
+                    auth = getAuth(app);
+                    
+                    // Firestore Kuralına Uyan Public Koleksiyon Yolu (Ortak Paylaşım)
+                    this.tenantsCollectionPath = `/artifacts/${appId}/public/data/tenants`; 
+
+                    document.getElementById('user-id-display').textContent = 'Oturum açılıyor...';
+                    
+                    // Oturum açma (Anonim veya Özel Token ile)
+                    const token = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+                    if (token) {
+                        await signInWithCustomToken(auth, token);
+                    } else {
+                        await signInAnonymously(auth);
+                    }
+                    
+                    // Yetkilendirme durumu değişince
+                    onAuthStateChanged(auth, (user) => {
+                        if (user) {
+                            userId = user.uid;
+                            document.getElementById('user-id-display').textContent = userId; 
+                            this.isAuthReady = true;
+                            this.setupApp();
+                        } else {
+                            userId = 'anon-user';
+                            document.getElementById('user-id-display').textContent = userId;
+                            this.isAuthReady = true;
+                            this.setupApp();
+                        }
+                    });
+
+                } catch (error) {
+                    console.error("Firebase başlatılırken kritik bir hata oluştu:", error);
+                    // Bu hata Canvas'tan Netlify'a geçince düzelmelidir.
+                    this.showMessage(`Kritik Başlangıç Hatası: ${error.message}`, 'error');
+                }
+            },
+
+            setupApp() {
+                this.setupFilterListeners();
+                this.loadTenants(); // Verileri dinlemeyi başlat
+            },
+
+            // --- Veri Yükleme ve Dinleme (Real-Time) ---
+            loadTenants() {
+                if (!this.isAuthReady || !db) return;
+
+                if (unsubscribeTenants) {
+                    unsubscribeTenants(); // Önceki dinleyiciyi kapat
+                }
+
+                const tenantsRef = collection(db, this.tenantsCollectionPath);
+                
+                // onSnapshot ile gerçek zamanlı dinleme
+                unsubscribeTenants = onSnapshot(tenantsRef, (snapshot) => {
+                    document.getElementById('loading-indicator').classList.add('hidden');
+                    // Verileri al ve Daire No'ya göre sırala
+                    this.tenantsData = snapshot.docs.map(doc => ({
+                        id: doc.id,
+                        ...doc.data(),
+                    })).sort((a, b) => (a.apartment || "").localeCompare(b.apartment || ""));
+                    
+                    // Admin için boş veritabanı uyarısını göster
+                    const adminHint = document.getElementById('empty-db-admin-hint');
+                    if (this.tenantsData.length === 0 && this.role === 'admin') {
+                        adminHint.classList.remove('hidden');
+                    } else if (adminHint) {
+                         adminHint.classList.add('hidden');
+                    }
+                    
+                    this.renderSchedule(); // Veriler değiştiğinde takvimi yeniden çiz
+                }, (error) => {
+                    console.error("Kiracı okuma hatası:", error);
+                    // Hata durumunda kullanıcıya bilgi ver
+                    this.showMessage(`Veri Yükleme Hatası: ${error.message}`, 'error');
+                });
+            },
+
+            // --- Takvim ve Özet Çizimi ---
+            renderSchedule() {
+                const list = document.getElementById('schedule-list');
+                const summaryCard = document.getElementById('tenant-summary-card');
+                list.innerHTML = '';
+                
+                if (this.tenantsData.length === 0) {
+                    summaryCard.innerHTML = `<p class="text-sm text-gray-500">Kiracı listesi boş. Beklenen gelir hesaplanamıyor.</p>`;
+                    document.getElementById('total-income').textContent = "0.00 ₺";
+                    return;
+                }
+
+                const schedule = this.generateSimulatedSchedule();
+                const totalIncome = schedule.reduce((sum, item) => sum + item.expectedRent, 0);
+                document.getElementById('total-income').textContent = `${totalIncome.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺`;
+                
+                // Özet hesaplama
+                const tenantSummary = schedule.reduce((acc, item) => {
+                    acc[item.tenantId] = (acc[item.tenantId] || 0) + item.expectedRent;
+                    return acc;
+                }, {});
+
+                summaryCard.innerHTML = '';
+                Object.keys(tenantSummary).forEach(tenantId => {
+                    const amount = tenantSummary[tenantId];
+                    const tenant = this.tenantsData.find(t => t.id === tenantId);
+                    if (!tenant) return;
+                    
+                    const amountStr = amount.toLocaleString('tr-TR', { minimumFractionDigits: 2 });
+                    
+                    const summaryItem = document.createElement('div');
+                    summaryItem.className = 'flex justify-between items-center text-sm p-2 border-b last:border-b-0';
+                    summaryItem.innerHTML = `
+                        <span class="font-medium text-gray-700">${tenant.name} (${tenant.apartment}):</span>
+                        <span class="font-bold text-primary">${amountStr} ₺</span>
+                    `;
+                    summaryCard.appendChild(summaryItem);
+                });
+
+                if (schedule.length === 0) {
+                    document.getElementById('no-payments').classList.remove('hidden');
+                    return;
+                }
+                document.getElementById('no-payments').classList.add('hidden');
+
+                // Takvim listesi çizimi
+                schedule.forEach(item => {
+                    const amountStr = item.expectedRent.toLocaleString('tr-TR', { minimumFractionDigits: 2 });
+
+                    const itemDiv = document.createElement('div');
+                    itemDiv.className = 'flex justify-between items-center p-4 bg-white rounded-xl shadow-sm border border-gray-100';
+                    itemDiv.innerHTML = `
+                        <div>
+                            <p class="text-lg font-bold text-gray-800">${item.tenantName} (${item.apartment})</p>
+                            <p class="text-sm text-gray-500">Beklenen Ay: ${item.monthName} ${item.year}</p>
+                        </div>
+                        <div class="text-right">
+                            <p class="text-sm font-semibold text-gray-600">Beklenen Kira:</p>
+                            <p class="text-xl font-extrabold text-primary">${amountStr} ₺</p>
+                        </div>
+                    `;
+                    list.appendChild(itemDiv);
+                });
+            },
+
+            // Simüle Edilmiş Kira Takvimi oluşturur
+            generateSimulatedSchedule() {
+                const now = new Date();
+                const months = [];
+                let monthCount = this.currentFilter === 'currentMonth' || this.currentFilter === 'lastMonth' ? 1 : 6;
+                
+                const currentMonth = now.getMonth();
+                const currentYear = now.getFullYear();
+
+                // İstenen ayları belirle
+                for (let i = 0; i < monthCount; i++) {
+                    const targetMonth = currentMonth - i;
+                    months.push(new Date(currentYear, targetMonth, 1));
+                }
+                
+                // Eğer filtre sadece 'Geçen Ay' ise, doğru ayı seç
+                if (this.currentFilter === 'lastMonth' && months.length > 0) {
+                    months.shift(); // Mevcut ayı kaldır
+                    months[0] = new Date(currentYear, currentMonth - 1, 1); // Geçen ayı ekle (eğer 6 ay değilse)
+                }
+                
+                // Ay isimleri
+                const monthNames = ["Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran", "Temmuz", "Ağustos", "Eylül", "Ekim", "Kasım", "Aralık"];
+                const schedule = [];
+
+                this.tenantsData.forEach(tenant => {
+                    months.forEach(date => {
+                        const monthIndex = date.getMonth();
+                        const year = date.getFullYear();
+
+                        // Sadece sabit kira tutarını alıp simülasyona ekle
+                        schedule.push({
+                            tenantId: tenant.id,
+                            tenantName: tenant.name,
+                            apartment: tenant.apartment,
+                            expectedRent: tenant.fixedRent, 
+                            monthName: monthNames[monthIndex],
+                            year: year,
+                            date: date
+                        });
+                    });
+                });
+
+                // En yeniden en eskiye sırala
+                return schedule.sort((a, b) => b.date.getTime() - a.date.getTime());
+            },
+
+            // --- Modal ve CRUD İşlemleri ---
+            openTenantManagementModal() {
+                if (this.role !== 'admin') {
+                    this.showMessage("Bu işlem için Admin yetkisi gereklidir.", 'warning');
+                    return;
+                }
+
+                let tenantsToManage = [...this.tenantsData]; 
+                
+                // Eğer veritabanı boşsa, örnek verileri yükle (TEMP ID ile)
+                if (tenantsToManage.length === 0) {
+                     this.initialTenants.forEach(t => tenantsToManage.push({...t, id: `TEMP_${newTenantCounter++}`, isNew: true}));
+                }
+
+                this.renderTenantRows(tenantsToManage);
+                document.getElementById('tenant-modal').classList.remove('hidden');
+            },
+            
+            closeTenantModal() {
+                document.getElementById('tenant-modal').classList.add('hidden');
+                this.renderTenantRows([]); // Modal içeriğini temizle
+            },
+
+            renderTenantRows(tenants) {
+                const inputContainer = document.getElementById('tenant-inputs');
+                inputContainer.innerHTML = '';
+                
+                if (tenants.length === 0) {
+                    inputContainer.innerHTML = `<p class="text-gray-500 text-center py-4">Kayıtlı kiracı bulunmuyor. Yeni bir kiracı eklemek için yukarıdaki butonu kullanın.</p>`;
+                }
+
+                // Kiracıları döngüye alıp form satırlarını çiz
+                tenants.forEach((tenant, index) => {
+                    const rowId = tenant.id;
+                    const isNewTemp = rowId.startsWith('TEMP_'); 
+
+                    const div = document.createElement('div');
+                    div.id = `tenant-row-${rowId}`;
+                    div.className = 'tenant-row relative bg-gray-50';
+                    div.innerHTML = `
+                        <input type="hidden" name="id_${index}" value="${rowId}">
+                        <div class="flex justify-between items-center mb-1">
+                            <p class="font-bold text-sm text-primary">
+                                ${tenant.apartment || 'Yeni Daire'}
+                                ${isNewTemp ? '<span class="text-xs font-medium text-red-500 ml-2">(Yeni)</span>' : ''}
+                            </p>
+                            <button type="button" onclick="App.deleteTenantRow('${rowId}', ${isNewTemp})" class="p-1 bg-delete text-white rounded-full hover:bg-red-600 transition duration-150">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                            </button>
+                        </div>
+
+                        <div class="input-group">
+                            <label for="name_${rowId}" class="text-gray-700">Kiracı Adı:</label>
+                            <input type="text" id="name_${rowId}" name="name_${index}" value="${tenant.name || ''}" required
+                                class="w-full p-2 border border-gray-300 rounded-lg text-sm focus:ring-secondary focus:border-secondary">
+                        </div>
+
+                        <div class="input-group">
+                            <label for="apartment_${rowId}" class="text-gray-700">Daire No/Tanımı:</label>
+                            <input type="text" id="apartment_${rowId}" name="apartment_${index}" value="${tenant.apartment || ''}" required
+                                class="w-full p-2 border border-gray-300 rounded-lg text-sm focus:ring-secondary focus:border-secondary">
+                        </div>
+
+                        <div class="input-group">
+                            <label for="rent_${rowId}" class="text-gray-700">Sabit Kira Tutarı (₺):</label>
+                            <input type="number" id="rent_${rowId}" name="rent_${index}" value="${tenant.fixedRent || 0}" min="0" step="1" required
+                                class="w-full p-2 border border-gray-300 rounded-lg text-sm focus:ring-secondary focus:border-secondary">
+                        </div>
+                    `;
+                    inputContainer.appendChild(div);
+                });
+            },
+
+            // Modal içinde kiracı satırını siler
+            deleteTenantRow(rowId, isNewTemp) {
+                if (isNewTemp) {
+                    document.getElementById(`tenant-row-${rowId}`).remove();
+                    this.showMessage("Yeni kiracı formu silindi.", 'warning');
+                    return;
+                }
+                
+                // Silme onayı yerine custom modal kullanılması gerektiği için, sadece işaretleme yapıldı.
+                if (!confirm(`Kiracı kaydını (ID: ${rowId}) silmek istediğinizden emin misiniz? Kaydedildiğinde kalıcı olarak silinecektir.`)) {
+                    return;
+                }
+                
+                const row = document.getElementById(`tenant-row-${rowId}`);
+                row.style.display = 'none';
+                // Silinmek üzere olan kayıtları takip etmek için bir input ekle
+                const deleteInput = document.createElement('input');
+                deleteInput.type = 'hidden';
+                deleteInput.name = `delete_${rowId}`;
+                deleteInput.value = 'true';
+                row.appendChild(deleteInput);
+                
+                this.showMessage("Kiracı silinmek üzere işaretlendi. Kaydet'e basarak işlemi tamamlayın.", 'warning');
+            },
+
+            // Yeni Kiracı Satırı Ekle
+            addNewTenantRow() {
+                newTenantCounter++;
+                const tempId = `TEMP_${newTenantCounter}`;
+                const newTenant = { id: tempId, name: '', apartment: 'Yeni Kiracı', fixedRent: 0, isNew: true };
+
+                const currentTenants = [];
+                // Formdaki mevcut verileri topla (silinmek üzere işaretlenmiş olanlar hariç)
+                document.querySelectorAll('#tenant-inputs > div:not([style*="display: none"])').forEach((div) => {
+                    const rowId = div.id.replace('tenant-row-', '');
+                    const nameInput = div.querySelector('[name^="name_"]');
+                    const apartmentInput = div.querySelector('[name^="apartment_"]');
+                    const rentInput = div.querySelector('[name^="rent_"]');
+                    
+                    if (nameInput && apartmentInput && rentInput) {
+                        currentTenants.push({ 
+                            id: rowId, 
+                            name: nameInput.value, 
+                            apartment: apartmentInput.value, 
+                            fixedRent: parseFloat(rentInput.value) || 0 
+                        });
+                    }
+                });
+                
+                currentTenants.push(newTenant);
+                // Yeni listeyi çiz
+                this.renderTenantRows(currentTenants);
+            },
+            
+            // Veritabanına Kaydetme ve Silme (CRUD)
+            async saveTenantChanges() {
+                if (this.role !== 'admin' || !db) return;
+
+                const tenantRows = document.getElementById('tenant-inputs').querySelectorAll('.tenant-row');
+                const savePromises = [];
+                let createdCount = 0;
+                let updatedCount = 0;
+                let deletedCount = 0;
+                let hasError = false;
+                
+                const currentData = Array.from(tenantRows).map(row => {
+                    // Silme bayrağı kontrolü (Gizlenmiş satırları kontrol et)
+                    const isDeleted = row.style.display === 'none' && row.querySelector('[name^="delete_"]')?.value === 'true';
+                    const id = row.id.replace('tenant-row-', '');
+
+                    if (isDeleted) {
+                        if (!id.startsWith('TEMP_')) { // Sadece kalıcı ID'li olanları sil
+                            deletedCount++;
+                            return { id: id, isDeleted: true };
+                        }
+                        return null; // Geçici ID'ler sadece göz ardı edilir
+                    }
+                    
+                    if (row.style.display === 'none') return null; // Zaten silinmiş ve geçici olanları da es geç
+
+                    const name = row.querySelector('[name^="name_"]').value.trim();
+                    const apartment = row.querySelector('[name^="apartment_"]').value.trim();
+                    const fixedRent = parseFloat(row.querySelector('[name^="rent_"]').value);
+
+                    if (!name || !apartment || isNaN(fixedRent) || fixedRent < 0) {
+                        this.showMessage(`HATA: ${name || 'Bir kiracı'} için tüm alanları doldurun.`, 'warning');
+                        hasError = true;
+                        return null;
+                    }
+                    
+                    const isNew = id.startsWith('TEMP_');
+                    if (isNew) createdCount++; else updatedCount++;
+
+                    return {
+                        id: id,
+                        name: name,
+                        apartment: apartment,
+                        fixedRent: fixedRent,
+                        isNew: isNew,
+                        isDeleted: false
+                    };
+                }).filter(item => item !== null);
+
+                if (hasError) return;
+                
+                // İşlemleri Promise Listesine Ekle
+                currentData.forEach(item => {
+                    
+                    if (item.isDeleted) {
+                        savePromises.push(deleteDoc(doc(db, this.tenantsCollectionPath, item.id)));
+                    } else {
+                        // Yeni kayıt için otomatik ID oluştur, mevcut kayıt için mevcut ID'yi kullan
+                        const docRef = item.isNew ? doc(collection(db, this.tenantsCollectionPath)) : doc(db, this.tenantsCollectionPath, item.id);
+                        
+                        const dataToSave = {
+                            name: item.name,
+                            apartment: item.apartment,
+                            fixedRent: item.fixedRent,
+                            updatedAt: Timestamp.now(),
+                        };
+                        if (item.isNew) {
+                            dataToSave.createdAt = dataToSave.updatedAt;
+                        }
+                        // setDoc ile kaydet (merge: true, mevcut alanları korur)
+                        savePromises.push(setDoc(docRef, dataToSave, { merge: true }));
+                    }
+                });
+
+                if (savePromises.length === 0) {
+                    this.closeTenantModal();
+                    this.showMessage("Hiçbir değişiklik yapılmadı.", 'warning');
+                    return;
+                }
+                
+                // Tüm İşlemleri Topluca Yürüt
+                try {
+                    await Promise.all(savePromises);
+
+                    this.showMessage(`İşlem Başarılı: ${createdCount} eklendi, ${updatedCount} güncellendi, ${deletedCount} silindi.`, 'success');
+                    this.closeTenantModal();
+                } catch (error) {
+                    console.error("Toplu kaydetme işleminde hata:", error);
+                    this.showMessage(`Kritik Kaydetme Hatası: Lütfen Firestore Kurallarını kontrol edin. (${error.code})`, 'error');
+                }
+            },
+            
+            // Oturum ve Ekran Yönetimi
+            switchScreen(screenId) {
+                document.getElementById('login-screen').classList.add('hidden');
+                document.getElementById('main-screen').classList.add('hidden');
+
+                const targetScreen = document.getElementById(screenId);
+                targetScreen.classList.remove('hidden');
+                
+                const isAdmin = this.role === 'admin';
+                document.getElementById('admin-actions').classList.toggle('hidden', !isAdmin);
+                document.getElementById('role-display').textContent = `Rol: ${isAdmin ? 'Admin' : 'Görüntüleyici'}`;
+                
+                // Admin PIN'ini temizle
+                if (screenId === 'login-screen') {
+                    document.getElementById('admin-pin').value = '';
+                    document.getElementById('pin-error').classList.add('hidden');
+                }
+            },
+
+            loginAsViewer() {
+                this.role = 'viewer';
+                this.switchScreen('main-screen');
+            },
+
+            attemptAdminLogin() {
+                const pin = document.getElementById('admin-pin').value;
+                const adminPin = '1234'; 
+
+                if (pin === adminPin) {
+                    this.role = 'admin';
+                    document.getElementById('pin-error').classList.add('hidden');
+                    this.switchScreen('main-screen');
+                } else {
+                    document.getElementById('pin-error').classList.remove('hidden');
+                    this.showMessage("Hatalı PIN girişi!", 'warning');
+                }
+            },
+
+            logout() {
+                this.role = 'viewer';
+                this.tenantsData = [];
+                if (unsubscribeTenants) { unsubscribeTenants(); }
+                this.switchScreen('login-screen');
+                // Oturum yenileme (yeni anonim ID almak için)
+                App.initAuth(); 
+            },
+
+            setupFilterListeners() {
+                const filterContainer = document.getElementById('filter-container');
+                filterContainer.addEventListener('click', (e) => {
+                    if (e.target.classList.contains('filter-btn')) {
+                        // Tüm butonları pasif yap
+                        filterContainer.querySelectorAll('.filter-btn').forEach(btn => {
+                            btn.classList.remove('bg-primary', 'text-white');
+                            btn.classList.add('bg-gray-200', 'text-gray-700', 'hover:bg-gray-300');
+                        });
+
+                        // Tıklanan butonu aktif yap
+                        e.target.classList.add('bg-primary', 'text-white');
+                        e.target.classList.remove('bg-gray-200', 'text-gray-700', 'hover:bg-gray-300');
+                        
+                        this.currentFilter = e.target.dataset.filter;
+                        
+                        const periodText = e.target.textContent;
+                        document.getElementById('current-period-text').textContent = periodText;
+
+                        this.renderSchedule(); // Takvimi yeniden çiz
+                    }
+                });
+                
+                // Başlangıçta "Bu Ay" filtresini seç
+                const initialFilterButton = filterContainer.querySelector(`[data-filter="${this.currentFilter}"]`);
+                if (initialFilterButton) {
+                    initialFilterButton.click();
+                }
+            }
+        };
+
+        // DOM yüklendiğinde başlat
+        window.onload = function() {
+            App.initAuth();
+            
+            // Kiracı Yönetimi Formu için Kaydetme Listener'ı
+            document.getElementById('tenant-form').onsubmit = (e) => {
+                e.preventDefault();
+                App.saveTenantChanges();
+            };
+        };
+    </script>
+</body>
+</html>
+
