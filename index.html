@@ -213,6 +213,7 @@
         let unsubscribeTenants = null; // onSnapshot dinleyicisini tutar
         let newTenantCounter = 0; // Geçici kiracı ID'leri için sayaç
         
+        // --- SADECE NETLIFY'DA ÇALIŞMAK İÇİN YAPI GÜNCELLEMESİ ---
         // Uygulama Durumu (Global App objesi)
         window.App = {
             role: 'viewer', 
@@ -250,14 +251,32 @@
             // --- Firebase ve Auth Başlatma ---
             async initAuth() {
                 try {
-                    // Canvas Ortam Değişkenleri
-                    const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-                    const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
-
-                    if (!firebaseConfig.projectId) {
-                        this.showMessage("HATA: Firebase yapılandırması eksik. Lütfen Canvas ortamında çalıştırın.", 'error');
-                        return;
+                    
+                    // --- BURASI KRİTİK NOKTA: Yapılandırma Kontrolü ---
+                    // 1. Canvas Ortamı kontrolü (Geliştirme için)
+                    let firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : null;
+                    let initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+                    let appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+                    
+                    // 2. Netlify Ortamı kontrolü (Canlı yayın için)
+                    if (!firebaseConfig) {
+                        // LÜTFEN AŞAĞIDAKİ YERE KENDİ GERÇEK FIREBASE CONFIG'İNİZİ JSON OLARAK YAPIŞTIRIN!
+                        // Formatı şu şekilde olmalıdır: { apiKey: "...", authDomain: "...", projectId: "...", ... }
+                        const netlifyConfig = JSON.parse(`
+{ "apiKey": "AIzaSyD2Zx4G66MCMWK9KZVloVfJ4eL-xA_5R0A", "authDomain": "kira-app-c78e1.firebaseapp.com", "projectId": "kira-app-c78e1", "storageBucket": "kira-app-c78e1.firebasestorage.app", "messagingSenderId": "871421517768", "appId": "1:871421517768:web:dcffc9e176313f65892afd", "measurementId": "G-P2V69CE73X" }
+                        `); 
+                        
+                        if (!netlifyConfig.projectId) {
+                            this.showMessage("HATA: Netlify için Firebase yapılandırmasını koda yapıştırmadınız. Lütfen kodu güncelleyin.", 'error');
+                            return;
+                        }
+                        firebaseConfig = netlifyConfig;
+                        // Netlify'da çalışırken auth token yoktur, anonim oturum açarız.
+                        initialAuthToken = null;
+                        appId = netlifyConfig.projectId; // projectId'yi appid olarak kullanmak güvenlidir.
                     }
+                    // --- YAPILANDIRMA BİTİŞİ ---
+
 
                     app = initializeApp(firebaseConfig);
                     db = getFirestore(app);
@@ -269,10 +288,10 @@
                     document.getElementById('user-id-display').textContent = 'Oturum açılıyor...';
                     
                     // Oturum açma (Anonim veya Özel Token ile)
-                    const token = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
-                    if (token) {
-                        await signInWithCustomToken(auth, token);
+                    if (initialAuthToken) {
+                        await signInWithCustomToken(auth, initialAuthToken);
                     } else {
+                        // Netlify'da her zaman anonim oturum açılacak
                         await signInAnonymously(auth);
                     }
                     
@@ -293,8 +312,8 @@
 
                 } catch (error) {
                     console.error("Firebase başlatılırken kritik bir hata oluştu:", error);
-                    // Bu hata Canvas'tan Netlify'a geçince düzelmelidir.
-                    this.showMessage(`Kritik Başlangıç Hatası: ${error.message}`, 'error');
+                    // Hata mesajını daha anlaşılır yapalım.
+                    this.showMessage(`Kritik Başlangıç Hatası: Firebase Config hatası. Lütfen koda yapıştırdığınız JSON'u kontrol edin.`, 'error');
                 }
             },
 
@@ -334,7 +353,7 @@
                 }, (error) => {
                     console.error("Kiracı okuma hatası:", error);
                     // Hata durumunda kullanıcıya bilgi ver
-                    this.showMessage(`Veri Yükleme Hatası: ${error.message}`, 'error');
+                    this.showMessage(`Veri Yükleme Hatası: Firestore Kurallarınızı kontrol edin. (${error.code})`, 'error');
                 });
             },
 
@@ -531,7 +550,7 @@
                     return;
                 }
                 
-                // Silme onayı yerine custom modal kullanılması gerektiği için, sadece işaretleme yapıldı.
+                // Onay kutusu yerine custom modal kullanılması gerekiyor, şimdilik confirm() kullanılıyor
                 if (!confirm(`Kiracı kaydını (ID: ${rowId}) silmek istediğinizden emin misiniz? Kaydedildiğinde kalıcı olarak silinecektir.`)) {
                     return;
                 }
@@ -665,7 +684,7 @@
                     this.closeTenantModal();
                 } catch (error) {
                     console.error("Toplu kaydetme işleminde hata:", error);
-                    this.showMessage(`Kritik Kaydetme Hatası: Lütfen Firestore Kurallarını kontrol edin. (${error.code})`, 'error');
+                    this.showMessage(`Kritik Kaydetme Hatası: Lütfen Firestore Kurallarını ve Config'i kontrol edin. (${error.code})`, 'error');
                 }
             },
             
